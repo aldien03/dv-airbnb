@@ -1,0 +1,248 @@
+---
+title: "Briefing DV capstone"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: 
+ html_document:
+   toc: true
+   toc_float: true
+   highlight: zenburn
+   df_print: paged
+   theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+File ini berisi template untuk mejawab pertanyaan 5W+1H saat briefing Capstone Data Visualization sebagai langkah awal sebelum membuat Dashboard. Silakan Bapak/Ibu mengisi jawaban di bawah. 
+
+File ini tidak akan dinilai namun Bapak/Ibu **WAJIB** disubmit ke dalam classroom pada hari H briefing Capstone Data Visualization.
+
+# What
+
+Tentukan tujuan atau informasi yang ingin ditampilkan dalam dashboard
+
+**Jawab**
+
+Tujuan yang ingin dicapai atau informasi yang ingin disampaikan:
+
+- Harga kompetitif di AirBNB.
+- Berapa Minimum Nights paling optimal.
+- Bagaimana menentukan headline yang attractive untuk potential user.
+- Tipe properti apa yang lebih disukai AirBNB user.
+- Dimana lokasi yang paling optimal dan disukai AirBNB user.
+
+# Who
+
+Untuk siapa dashboard ini dibuat? Siapa target pembaca dari dashboard ini?
+
+**Jawab**
+
+Property Investor / Landlord / Property Management
+
+# Why
+
+Apakah data yang dibuat relevan atau sesuai dengan tujuan? Mengapa?
+
+**Jawab**
+
+Ya, data sangat relevan. Walaupun pasti ada perbedaan di setiap negara/kota. 
+
+
+# When
+
+Apakah data yang digunakan masih *up to date* atau masih relevan dengan kondisi sekarang? Apakah ada informasi tentang tanggal update terakhir dari data tersebut?
+
+**Jawab**
+
+2019. Didapatkan dari kaggle
+
+
+# How
+
+Bagaimana Bapak/Ibu menggunakan visualisasi untuk menjawab tujuan yang telah disebutkan? 
+
+```{r}
+library(tidyverse)
+library(plotly)
+library(glue) 
+library(scales) 
+library(leaflet)
+library(ggwordcloud)
+library(lubridate)
+library(ggcorrplot)
+library(reshape2)
+library(wordcloud)
+library(RColorBrewer)
+
+
+
+airbnb <- read_csv("AB_NYC_2019.csv")
+head(airbnb)
+
+airbnb_clean <- airbnb %>% 
+                  drop_na(name, host_name) %>% 
+                  mutate(reviews_per_month = replace_na(data = reviews_per_month, replace = 0),
+                  last_review = replace_na(data = as.character(last_review), replace = "EMPTY"))
+
+theme <- theme(legend.key = element_rect(fill="black"),
+           legend.background = element_rect(color="white", fill="#263238"),
+           plot.subtitle = element_text(size=6, color="white"),
+           panel.background = element_rect(fill="#dddddd"),
+           panel.border = element_rect(fill=NA),
+           panel.grid.minor.x = element_blank(),
+           panel.grid.major.x = element_blank(),
+           panel.grid.major.y = element_line(color="darkgrey", linetype=2),
+           panel.grid.minor.y = element_blank(),
+           plot.background = element_rect(fill="#263238"),
+           text = element_text(color="white"),
+           axis.text = element_text(color="white")
+           )
+```
+
+
+Buat plot yang akan dimasukkan ke dalam dashboard. Boleh dalam bentuk `ggplot` maupun `plotly`.
+
+**Jawab**
+
+Plot untuk menjawab tujuan pertama
+```{r}
+# your code here
+box_plot <- ggplot(airbnb_clean, aes(x=room_type, y=price)) +
+              geom_boxplot(aes(fill=room_type),show.legend = F) +
+              scale_y_log10(labels = dollar_format(accuracy = 1)) +
+              geom_hline(yintercept = mean(airbnb_clean$price), col="firebrick", linetype =2) +
+              labs( x = NULL,
+                    y = "Price",
+                    title = "Pricing Summary by Room Type") +
+              theme
+
+ggplotly(box_plot)
+```
+
+Plot kedua
+```{r}
+# your code here
+airbnb_mn_45 <- airbnb_clean %>% 
+  filter(minimum_nights < 45)
+
+ggplot(airbnb_mn_45, aes(x=minimum_nights, y= ..density..)) +
+  geom_histogram(bins = 50, fill="firebrick") +
+  geom_density(alpha = 0.2, fill = "white") +
+  geom_vline(xintercept = round(mean(airbnb_mn_45$minimum_nights,2)),size=1, linetype=2, col="white") +
+  scale_x_continuous(n.breaks = 10) +
+  labs( x = "Min. Night",
+        y = "Density",
+        title = "Minimum Nights Distribution",
+        subtitle = glue("Mean value: {mean(airbnb_clean$minimum_nights,2)} days")) +
+  theme
+```
+
+Plot ketiga
+```{r}
+# your code here
+wc_pr_words <- airbnb_clean %>% 
+              filter(room_type == "Private room",
+                     price < 300,
+                     number_of_reviews > 5) %>% 
+            select(name)
+
+wordcloud(words = wc_pr_words$name, 
+          min.freq = 1, 
+          max.words = 100, 
+          color=brewer.pal(8, "Dark2"),
+          random.order = F,
+          rot.per = 0.35)
+
+```
+
+```{r}
+wc_apt_words <- airbnb_clean %>% 
+                  filter(room_type == "Entire home/apt",
+                          number_of_reviews > 2) %>% 
+                  select(name)
+
+
+wordcloud(words = wc_apt_words$name, 
+          min.freq = 2, 
+          max.words = 100, 
+          color=brewer.pal(8, "Dark2"),
+          random.order = F,
+          rot.per = 0.35)
+```
+
+Plot keempat
+```{r}
+room_type_all <- airbnb_clean %>% 
+                    group_by(room_type) %>% 
+                    summarise(property_count = length(room_type))
+
+count_all_plot <- ggplot(room_type_all, aes(x=room_type, 
+                          y=property_count,
+                          text = glue("Property Count: {property_count}"))) +
+                    geom_col(fill="firebrick") +
+                    labs( x = NULL,
+                          y = "Count",
+                          title = "Property Listing Count Grouped by Room Type") +
+                    theme
+
+ggplotly(count_all_plot, tooltip="text")
+```
+
+
+Plot kelima
+```{r}
+airbnb_spatial <- airbnb_clean %>% 
+                    select(longitude, latitude, neighbourhood_group, neighbourhood, price, room_type)
+
+getColor <- function(x) {
+  sapply(airbnb_spatial$price, function(price){
+    if (price <= 100) {
+      "green"
+    } else if (price > 100 & price <=300) {
+      "yellow"
+    } else {
+      "red"
+    }
+  })
+}
+
+icons <- awesomeIcons(
+  library = "ion",
+  markerColor = getColor(airbnb_spatial$price)
+)
+
+leaflet(airbnb_spatial) %>% 
+  setView(lng = mean(airbnb_spatial$longitude), lat = mean(airbnb_spatial$latitude), zoom = 10) %>% 
+  addTiles() %>% 
+  addAwesomeMarkers(label= glue("Daily Rent Price: {airbnb_spatial$price},
+                                              Neighbourhood: {airbnb_spatial$neighbourhood_group},
+                                             Room Type: {airbnb_spatial$room_type}"),
+                    labelOptions = labelOptions(textsize = "12px"),
+                    icon = icons,
+                    clusterOptions = markerClusterOptions())
+```
+
+
+# Where
+
+Bagaimana desain layout atau tata letak dashboard yang akan dibuat?
+
+**Jawab**
+
+Contoh penulisan layout. 
+
+Tab atau halaman pertama
+
+- Median Pricing
+- Median Minimum Night
+- Map (Slider Zoom, Filter: Room Type, Neighboorhood)
+
+Tab atau halaman kedua
+
+- Word count (based on top Host)
+
+Tab ketiga
+
+- data

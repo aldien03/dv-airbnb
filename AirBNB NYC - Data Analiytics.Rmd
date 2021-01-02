@@ -1,0 +1,530 @@
+---
+title: "AirBNB NYC - Data Analytics"
+author: "Muhammad Aldien Said"
+date: "12/18/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+**AirBNB New York City data analytic**
+
+AirBNB is a very popular startup on hospitality industry. The business model is allowing landlord to renting their properties as whole or even just a room on their house. The rental price is relatively lower than hotels, thus potential renters has more choices on deciding where they will stays during their holidays or business related visit.
+
+There are several questions in mind related to New York AirBNB data that was taken from:
+https://www.kaggle.com/dgomonov/new-york-city-airbnb-open-data
+
+1. What is the most popular room type for the potential renters? Do they prefer to rent the entire property or just a private room? This answers will lead landlords for their future property investment as rental market wished.
+
+2. What is the pricing range that potential renters are looking for? Obviously, this could help landlords or property investors to set right rental pricing.
+
+3. How many days that renters looking via AirBNB booking? Are the renters only using AirBNB for short period (less than a week) or they also using AirBNB to rent property on the long period (more than a week).
+
+4. Do reviews could affecting the rental pricing? 
+
+5. Do AirBNB listings in the NYC are owned by the large property investors or rented by single owner? 
+
+6. Where are the most popular neighborhood? 
+
+7. What is the word cloud of the name of listing? Do the "word" could triggers more sales which I assumed can be represented by number of reviews. Therefore the landlords could use the power word as their property title at AirBNB
+
+8. If minimum night set to more than a day, then do this will affect the sales? The hypothesis is sales has positive correlation with number of reviews.  
+
+### Importing Libraries
+```{r}
+library(tidyverse)
+library(plotly)
+library(glue) 
+library(scales) 
+library(leaflet)
+library(ggwordcloud)
+library(lubridate)
+library(ggcorrplot)
+library(reshape2)
+library(wordcloud)
+library(RColorBrewer)
+```
+
+### Data Reading
+
+```{r}
+airbnb <- read_csv("AB_NYC_2019.csv")
+head(airbnb)
+```
+
+### Summary of data set
+```{r}
+glimpse(airbnb)
+```
+
+Global visualization theme
+```{r}
+theme <- theme(legend.key = element_rect(fill="black"),
+           legend.background = element_rect(color="white", fill="#263238"),
+           plot.subtitle = element_text(size=6, color="white"),
+           panel.background = element_rect(fill="#dddddd"),
+           panel.border = element_rect(fill=NA),
+           panel.grid.minor.x = element_blank(),
+           panel.grid.major.x = element_blank(),
+           panel.grid.major.y = element_line(color="darkgrey", linetype=2),
+           panel.grid.minor.y = element_blank(),
+           plot.background = element_rect(fill="#263238"),
+           text = element_text(color="white"),
+           axis.text = element_text(color="white")
+           )
+```
+
+
+### Data pre-processing
+
+The data set consist 16 columns and 48895 rows in total.
+```{r}
+dim(airbnb)
+```
+
+Let's have a look on the raw data set and pre-process the data as necessary.
+```{r}
+airbnb %>% 
+  is.na() %>% 
+  colSums()
+```
+
+There are a few columns that have missing data. The NULL rows on the **name** and **host_name** will be deleted. But on NULL value on the **last_review** and **reviews_per_month** will be imputed with zero value, since is has literally no review posted on that particular properties.
+
+```{r}
+airbnb_clean<- airbnb %>% 
+                  drop_na(name, host_name) %>% 
+                  mutate(reviews_per_month = replace_na(data = reviews_per_month, replace = 0),
+                         last_review = replace_na(data = as.character(last_review), replace = "EMPTY")) 
+
+airbnb_clean <- airbnb_clean %>% 
+                    mutate(price_group=ifelse(price < 61, "Very Low",
+                                          ifelse(price < 91, "Low",
+                                          ifelse(price < 150, "Moderate",
+                                          ifelse(price < 300, "High", "Very High"
+                                          ))))) %>% 
+                    mutate(reviews_group=ifelse(number_of_reviews < 1, "None",
+                                          ifelse(number_of_reviews < 4, "Low",
+                                          ifelse(number_of_reviews < 10, "Moderate",
+                                          ifelse(number_of_reviews < 30, "High", "Very High"
+                                          ))))) %>% 
+                    mutate(est_revenue = price * number_of_reviews * median(minimum_nights))
+
+head(airbnb_clean)
+```
+
+The data set looks to be ready, but before going to the answering pre-defined questions above. I would like to see the statistical summary of the data set.
+
+```{r}
+summary(airbnb_clean)   
+```
+
+What about the correlation of each columns? Is there any strong relationship between each column that could direct to explore the further more?
+
+```{r}
+airbnb_corr <- airbnb_clean %>% 
+                select(price, minimum_nights, number_of_reviews, reviews_per_month, availability_365) %>% 
+                set_names("price", "minimum nights", "number of reviews", "reviews per month", "availability") %>% 
+                cor()
+
+airbnb_corr
+```
+
+Removing data redundancy:
+```{r}
+airbnb_corr_del <- function(data) {
+  data[upper.tri(data)] <- NA
+  return(data)
+}
+
+airbnb_corr_clean <- airbnb_corr_del(airbnb_corr)
+airbnb_corr_clean
+```
+
+Reshaping correlation data
+```{r}
+airbnb_corr_clean_melt <- melt(airbnb_corr_clean)
+airbnb_corr_clean_melt
+```
+
+```{r}
+corr_plot <- ggplot(data=airbnb_corr_clean_melt, mapping = aes(x=Var1, 
+                                                  y=Var2, 
+                                                  fill=value,
+                                                  text = glue("Corr value: {value}"))) +
+  geom_tile() +
+  scale_fill_gradient(low = "#1f0101", high = "#fc0303") +
+  labs(x = NULL,
+       y = NULL) +
+  scale_x_discrete(labels = wrap_format(10)) +
+  scale_y_discrete(labels = wrap_format(30)) +
+  theme
+
+ggplotly(corr_plot, tooltip = "text")
+```
+
+The correlation plot shows that only *number of reviews* and *reviews per month* that has strong positive relationship, which is quite make sense in logical manner. But, There are no direct relationship between price, minimum night and reviews. 
+
+This could hints landlords/property investor that even tough the number of reviews is sky high, but it will not crank up the property rental price. Although the reviews could potentially affect future renters for the booking decision whether the particular property is suitable with their rental purpose.
+
+### Business Question: What is the most popular room type for the potential renters? Do they prefer to rent the entire property or just a private room? 
+
+Since the data set doesn't include the sales and booking data, it's quite tricky to determine what is market desirability on property type preference.
+
+Let's start by grouping and counting the property, to get some clues:
+```{r}
+room_type_all <- airbnb_clean %>% 
+                    group_by(room_type) %>% 
+                    summarise(property_count = length(room_type))
+room_type_all
+```
+```{r}
+count_all_plot <- ggplot(room_type_all, aes(x=room_type, 
+                          y=property_count,
+                          text = glue("Property Count: {property_count}"))) +
+                    geom_col(fill="firebrick") +
+                    labs( x = NULL,
+                          y = "Count",
+                          title = "Property Listing Count Grouped by Room Type") +
+                    theme
+
+ggplotly(count_all_plot, tooltip="text")
+```
+
+
+What is the count distribution if *room type* and *neighbourhood_group* are grouped.
+```{r}
+room_type_by_neighbourhood <-  airbnb_clean %>% 
+                                group_by(room_type, neighbourhood_group) %>% 
+                                summarise(property_count = length(room_type)) %>% 
+                                arrange(desc(property_count))
+room_type_by_neighbourhood
+```
+
+```{r}
+count_all_by_neighbourhood_plot <- ggplot(room_type_by_neighbourhood, aes(x = room_type, 
+                                      y = property_count,
+                                      text = glue("Property Count: {property_count}"))) +
+                                    geom_col(aes(fill=property_count), show.legend = FALSE) +
+                                    facet_wrap(~neighbourhood_group, scales="free_x") +
+                                    scale_fill_gradient(low = "#1f0101", high = "#fc0303") +
+                                    scale_x_discrete(labels = wrap_format(8)) +
+                                    labs( x = NULL,
+                                          y = "Property Count"
+                                        )+
+                                    theme
+
+ggplotly(count_all_by_neighbourhood_plot, tooltip="text")
+```
+
+How about aggregating *room_type* with *reviews_per_month*. Hopefully, data will showing hints on what renters really need regarding room type.
+
+```{r}
+mean_mean_reviews <-  airbnb_clean %>% 
+                          group_by(room_type) %>% 
+                          summarise(mean_review_per_month = mean(reviews_per_month)) %>% 
+                          arrange(desc(mean_review_per_month))
+mean_mean_reviews
+```
+Key takeaway:
+1. Renter would pick either "Entire Home/Apt" or "Private Room".
+2. Most of listings are located on "Manhattan" and "Brooklyn"
+
+### Business Question: What is the pricing range that potential renters are looking for? 
+
+```{r}
+airbnb_clean_1000 <- airbnb_clean %>% 
+  filter(price < 1000)
+
+ggplot(airbnb_clean_1000, aes(x=price, y= ..density..)) +
+  geom_histogram(bins = 50, fill="firebrick") +
+  geom_density(alpha = 0.2, fill = "white") +
+  geom_vline(xintercept = round(mean(airbnb_clean$price,2)),size=1, linetype=2, col="white") +
+  scale_x_continuous(n.breaks = 10) +
+  labs( x = "Price",
+        y = "Density",
+        title = "Pricing Distribution",
+        subtitle = glue("Mean value: ${mean(airbnb_clean$price,2)}")) +
+  theme
+```
+
+The pricing distribution image is not quite answering the business question, since there are 3 room types that obviously has different pricing distribution.
+
+```{r}
+pricing_plot <- ggplot(airbnb_clean_1000, aes(x=price, y= ..density..)) +
+  geom_histogram(bins = 50, fill="firebrick", ) +
+  geom_density(alpha = 0.2, fill = "white") +
+  facet_wrap(~room_type, scales="free_y", nrow = 3, ncol=1) +
+  scale_x_continuous(n.breaks = 10) +
+  labs( x = "Price",
+        y = "Density",
+        title = "Pricing Distribution by Room Type") +
+  theme
+
+ggplotly(pricing_plot) 
+```
+
+How about de-structuring pricing distribution grouped by neighborhood?
+```{r}
+pricing_plot_by_neighbourhood <- ggplot(airbnb_clean_1000, aes(x=price, y= ..density..)) +
+  geom_histogram(bins = 50, fill="firebrick", ) +
+  geom_density(alpha = 0.5, fill = "white") +
+  facet_grid(room_type ~ neighbourhood_group , scales="free_y") +
+  scale_x_continuous(n.breaks = 4,labels = wrap_format(5)) +
+  labs( x = "Price",
+        y = "Density",
+        title = "Pricing Distribution by Room Type & Neigbourhood") +
+  theme
+
+ggplotly(pricing_plot_by_neighbourhood) 
+```
+
+
+Let's have a look on the box plot, what will be the insight?
+```{r}
+box_plot <- ggplot(airbnb_clean, aes(x=room_type, y=price)) +
+              geom_boxplot(aes(fill=room_type),show.legend = F) +
+              scale_y_log10(labels = dollar_format(accuracy = 1)) +
+              geom_hline(yintercept = mean(airbnb_clean$price), col="firebrick", linetype =2) +
+              labs( x = NULL,
+                    y = "Price",
+                    title = "Pricing Summary by Room Type") +
+              theme
+
+ggplotly(box_plot)
+```
+
+How about pricing distribution spatially? Is there any prime favorite location for the future renter?
+```{r}
+airbnb_spatial <- airbnb_clean %>% 
+                    select(longitude, latitude, neighbourhood_group, neighbourhood, price, room_type)
+head(airbnb_spatial)  
+```
+```{r}
+getColor <- function(x) {
+  sapply(airbnb_spatial$price, function(price){
+    if (price <= 100) {
+      "green"
+    } else if (price > 100 & price <=300) {
+      "yellow"
+    } else {
+      "red"
+    }
+  })
+}
+
+icons <- awesomeIcons(
+  library = "ion",
+  markerColor = getColor(airbnb_spatial$price)
+)
+```
+
+
+```{r}
+leaflet(airbnb_spatial) %>% 
+  setView(lng = mean(airbnb_spatial$longitude), lat = mean(airbnb_spatial$latitude), zoom = 10) %>% 
+  addTiles() %>% 
+  addAwesomeMarkers(label= glue("Daily Rent Price: {airbnb_spatial$price},
+                                              Neighbourhood: {airbnb_spatial$neighbourhood_group},
+                                             Room Type: {airbnb_spatial$room_type}"),
+                    labelOptions = labelOptions(textsize = "12px"),
+                    icon = icons,
+                    clusterOptions = markerClusterOptions())
+```
+
+Top 5 most expensive neighborhood:
+```{r}
+airbnb_clean %>% 
+  group_by(neighbourhood_group) %>% 
+  summarise(avg_exp_price = median(price),
+            avg_var = var(price)) %>% 
+  arrange(desc(avg_exp_price))
+```
+
+Key Takeaway:
+-Sweet pricing spot is 106 dollar for Entire Home/Apt and 70 for Private Room.
+-The most expensive neighborhood is Manhattan. But, if the renter looking for cheaper area to stay in New York City for a short trip. Then, consider to find rental properties on the Bronx area.
+
+
+### How many days that potential renters looking via AirBNB booking? Are the renters only using AirBNB for short period (less than a week) or they also using AirBNB to rent property on the long period (more than a week).
+
+```{r}
+airbnb_mn_45 <- airbnb_clean %>% 
+  filter(minimum_nights < 45)
+
+ggplot(airbnb_mn_45, aes(x=minimum_nights, y= ..density..)) +
+  geom_histogram(bins = 50, fill="firebrick") +
+  geom_density(alpha = 0.2, fill = "white") +
+  geom_vline(xintercept = round(mean(airbnb_mn_45$minimum_nights,2)),size=1, linetype=2, col="white") +
+  scale_x_continuous(n.breaks = 10) +
+  labs( x = "Min. Night",
+        y = "Density",
+        title = "Minimum Nights Distribution",
+        subtitle = glue("Mean value: {mean(airbnb_clean$minimum_nights,2)} days")) +
+  theme
+```
+
+Minimum Night by Room Types
+
+```{r}
+mn_box_plot <- ggplot(airbnb_mn_45, aes(x=room_type, y=minimum_nights)) +
+              geom_boxplot(aes(fill=room_type),show.legend = F) +
+              geom_hline(yintercept = median(airbnb_mn_45$minimum_nights), col="firebrick", linetype =2) +
+              scale_y_continuous(breaks=seq(0,45,5)) + 
+              labs( x = NULL,
+                    y = "Minimum Nights",
+                    title = "Minimum Nights Summary by Room Type") +
+              theme
+
+ggplotly(mn_box_plot)
+```
+
+Key takeaways:
+-Interestingly speaking that entire apt/home has 3 days of minimum nights and 2 days of minimum nights. This could hints landlords that they could set minimum nights 2-3 days depending of room type without hitting big risk of losing potential renters.
+-It seems the behavior or AirBNB user is quite different that Hotel that could stay a day or less without any hesitation.
+-Longer minimum nights has positive economical impact since the revenue is relative more than night stayer and locked for 2-3 days. 
+
+### Do reviews could affecting the rental pricing? 
+```{r}
+ggplot(airbnb_clean,aes(x= number_of_reviews, y=price)) +
+  geom_point(aes(size=price), alpha=0.5, color="firebrick",show.legend = F) +
+                labs( x = "Number of Reviews",
+                    y = "Price",
+                    title = "Relationship between number of review and price") +
+              theme
+```
+
+Key takeaway:
+- There is no direct relationship between number of reviews and pricing. More surprisingly, the high-tier pricing properties has low count of reviews.
+
+### Where are the most popular neighborhood? What is the correlation with price and number of reviews?
+
+Exploring **reviews_per_months** with **neighbourhood_group**. Because **reviews_per_months** assumed has positive relationship with average booking monthly. Since, the reviews in AirBNB has rule that could be written by verified renters in order to minimizing fake reviews.
+```{r}
+avg_reviews_mo <- airbnb_clean_1000 %>% 
+  filter(price< 300) %>% 
+  group_by(neighbourhood_group) %>% 
+  summarise(avg_reviews_monthly = mean(reviews_per_month)) %>% 
+  arrange(desc(avg_reviews_monthly))
+
+avg_reviews_mo
+```
+
+Key takeaway:
+- **Staten Islands** is quite popular among airBNB user.
+
+### What is the word cloud of the name of listing? Do the "word" could triggers more sales which I assumed can be represented by number of reviews. Therefore the landlords could use the power word as their property title at AirBNB
+
+```{r}
+wc_pr_words <- airbnb_clean_1000 %>% 
+              filter(room_type == "Private room",
+                     price < 300,
+                     number_of_reviews > 5) %>% 
+            select(name)
+
+wordcloud(words = wc_pr_words$name, 
+          min.freq = 1, 
+          max.words = 100, 
+          color=brewer.pal(8, "Dark2"),
+          random.order = F,
+          rot.per = 0.35)
+```
+
+```{r}
+wc_apt_words <- airbnb_clean_1000 %>% 
+                  filter(room_type == "Entire home/apt",
+                          number_of_reviews > 2) %>% 
+                  select(name)
+
+
+wordcloud(words = wc_apt_words$name, 
+          min.freq = 2, 
+          max.words = 100, 
+          color=brewer.pal(8, "Dark2"),
+          random.order = F,
+          rot.per = 0.35)
+```
+
+Key takeaway:
+- Private room: The word of **cozy**, **spacious**, **private** and **near** seems to be power words that are proven to be good AirBNB title. 
+- Entire Apt/Home: The word of **cozy**, **spacious**, **beautiful** and **loft** seems to be power words that are proven to be good AirBNB title. 
+
+### If minimum night set to more than a day, then do this will affect the sales? The hypothesis is sales has positive correlation with number of reviews.  
+No. Not at all
+
+There are so many questions that could be dive bit deeper, such as price prediction and revenue prediction.  
+
+```{r}
+airbnb_clean%>%
+                                                          select(neighbourhood_group, neighbourhood) %>%
+                                                          names() %>%
+                                                          str_replace_all(pattern = "_", replacement = " ") %>%
+                                                          str_to_title()
+```
+
+```{r}
+airbnb_clean[,"neighbourhood_group"]
+max(airbnb$price)
+head(airbnb$price)
+airbnb$price[2]
+```
+
+```{r}
+head(airbnb_clean)
+```
+
+```{r}
+# head(airbnb_clean)
+
+host_agg_overview <- airbnb_clean %>% 
+  
+  group_by(host_id,host_name) %>% 
+  summarise(est_total_revenue = sum(est_revenue),
+            total_properties = length(id)) %>% 
+  arrange(desc(est_total_revenue))
+
+sum(host_agg$est_total_revenue)
+
+host_rev_10000  <- airbnb_clean %>% 
+  
+  group_by(host_id,host_name, latitude, longitude, room_type, price, price_group, est_revenue, minimum_nights, number_of_reviews, reviews_group, neighbourhood_group) %>% 
+  summarise(est_total_revenue = sum(est_revenue)) %>% 
+  filter(est_revenue>100000) %>% 
+  arrange(desc(est_total_revenue))
+
+top_40 <-  host_agg[1:40,]
+```
+
+
+```{r}
+top_40_plot <- ggplot(top_40, aes(y=reorder(host_name, est_total_revenue), 
+                   x=est_total_revenue,
+                   text = glue("Est. Revenue: {est_total_revenue},
+                               Property Count: {total_properties}"))) +
+  geom_col(aes(fill=est_total_revenue)) +
+  scale_x_continuous(labels = dollar_format()) +
+  scale_fill_gradient(low = "#1f0101", high = "#fc0303") +
+  labs(x = "Estimated Total Revenue",
+       y = "Host") +
+  theme +
+  theme(legend.position = "none")
+
+ggplotly(top_40_plot, tooltip = "text")
+```
+```{r}
+leaflet(host_rev_10000) %>% 
+  setView(lng = mean(host_rev_10000$longitude), lat = mean(host_rev_10000$latitude), zoom = 10) %>% 
+  addTiles() %>% 
+  addAwesomeMarkers(label= glue("Daily Rent Price: {host_rev_10000$price},
+                                              Neighbourhood: {host_rev_10000$neighbourhood_group},
+                                             Room Type: {host_rev_10000$room_type}"),
+                    labelOptions = labelOptions(textsize = "12px"),
+                    icon = icons,
+                    clusterOptions = markerClusterOptions())
+```
+
+
+
+
